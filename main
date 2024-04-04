@@ -1,0 +1,110 @@
+import asyncio
+import re
+import logging
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import ParseMode
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+
+
+API_TOKEN = '6854417659:AAEColPXyaUdH4tIUo000smUy_FHmuy5ANM'
+
+
+logging.basicConfig(level=logging.INFO)
+
+
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot, storage=MemoryStorage())
+dp.middleware.setup(LoggingMiddleware())
+
+phone_number_pattern = re.compile(r'^7 \d{3} \d{3} \d{2} \d{2}$')
+
+class Form(StatesGroup):
+    FIO = State()
+    PHONE = State()
+    COMMENT = State()
+    CONFIRMATION = State()
+
+
+@dp.message_handler(commands=["start"])
+async def start(message: types.Message):
+    await bot.send_message(message.chat.id, f'{message.from_user.first_name}, Добро пожаловать в компанию DamnIT')
+    await Form.FIO.set()
+    await asyncio.sleep(1)
+    await bot.send_message(message.chat.id, 'Напишите своё ФИО')
+
+
+@dp.message_handler(state=Form.FIO)
+async def fio(message: types.Message, state: FSMContext):
+    if any(char.isdigit() for char in message.text):
+        await bot.send_message(message.chat.id, "ФИО не должно содержать цифры.")
+        return
+    if (len(message.text.split()) < 2):
+        await bot.send_message(message.chat.id, "Некорректное ФИО, попробуйте ещё раз.")
+        return
+
+    async with state.proxy() as data:
+        data['ФИО'] = message.text
+
+    await Form.next()
+    await bot.send_message(message.chat.id, 'Укажите ваш номер телефона (Формат: 7 999 999 99 99)')
+
+
+@dp.message_handler(state=Form.PHONE)
+async def phone(message: types.Message, state: FSMContext):
+    if not phone_number_pattern.match(message.text):
+        await bot.send_message(message.chat.id, "Неверный формат номера. Пожалуйста, укажите номер в формате: 7 999 999 99 99")
+        return
+
+    async with state.proxy() as data:
+        data['Телефон'] = message.text
+
+    await Form.next()
+    await bot.send_message(message.chat.id, 'Напишите любой комментарий.')
+
+
+@dp.message_handler(state=Form.COMMENT)
+async def comment(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['Комментарий'] = message.text
+
+    await Form.next()
+    await bot.send_message(message.chat.id, 'Последний шаг. Ознакомьтесь с вводными положениями.')
+    await bot.send_document(message.chat.id, types.InputFile("C:/Users/75572/PycharmProjects/pythonProject/test.pdf"))
+    await asyncio.sleep(2)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    btn = types.KeyboardButton("Да")
+    markup.add(btn)
+    await bot.send_message(message.chat.id, 'Ознакомились?', reply_markup=markup)
+
+@dp.message_handler(state=Form.CONFIRMATION)
+async def accept(message: types.Message, state: FSMContext):
+    if message.text.lower() == 'да':
+        await last_step(message, state)
+    else:
+        await bot.send_message(message.chat.id, 'Пожалуйста, ознакомьтесь с вводными положениями. После ознакомления нажмите ДА')
+
+
+async def last_step(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        await bot.send_message(message.chat.id, 'Спасибо за успешную регистрацию')
+        await bot.send_photo(message.chat.id, "https://imgur.com/a/Po8ft3V")
+        await send_user_data(message.chat.id, data, recipient_chat_id=588119929)
+
+
+    await state.finish()
+
+
+async def send_user_data(chat_id, data, recipient_chat_id):
+    message = "Данные нового пользователя:\n\n"
+    for key, value in data.items():
+        message += f"{key}: {value}\n"
+    await bot.send_message(recipient_chat_id, message, parse_mode=ParseMode.MARKDOWN)
+
+
+
+if __name__ == '__main__':
+    from aiogram import executor
+    executor.start_polling(dp, skip_updates=True)
